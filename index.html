@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 旅費小管家</title>
+<style>
+  :root {
+    color-scheme: light;
+    --ink: #24382e;
+    --muted: #53675b;
+    --accent: #355d49;
+    --line: #d8e1d7;
+    --soft: #edf3eb;
+    --error: #9f322a;
+    font: 16px/1.55 system-ui, "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f1; color: var(--ink); }
+  main { width: min(1120px, 100% - 32px); margin: 40px auto; }
+  header { margin-bottom: 25px; }
+  h1 { margin: 0 0 5px; font-size: clamp(1.8rem, 5vw, 2.5rem); letter-spacing: .02em; }
+  header p, .hint { margin: 0; color: var(--muted); }
+  .layout { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; align-items: start; }
+  .column { display: grid; gap: 14px; min-width: 0; }
+  .panel { padding: 20px; border: 1px solid var(--line); border-radius: 17px; background: white; min-width: 0; }
+  h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; font-size: 1.23rem; }
+  .step {
+    display: inline-grid; place-items: center; width: 29px; height: 29px;
+    border-radius: 50%; background: var(--accent); color: white; font-size: .9rem;
+    font-weight: 750; flex: 0 0 auto;
+  }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .budget-field {
+    display: flex; align-items: center; gap: 8px; flex: 1 1 160px;
+    padding: 0 12px; border: 1px solid var(--line); border-radius: 10px;
+    background: #f7f9f6; color: var(--muted);
+  }
+  input, button { font: inherit; }
+  input { min-width: 0; color: var(--ink); }
+  input::placeholder { color: #596e62; opacity: 1; }
+  #budget { width: 100%; padding: 10px 0; border: 0; outline: 0; background: transparent; }
+  #expense {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--line);
+    border-radius: 10px; background: #f7f9f6; margin-bottom: 10px;
+  }
+  button {
+    min-height: 46px; border: 0; border-radius: 10px; padding: 9px 15px;
+    font-weight: 700; color: white; background: var(--accent); cursor: pointer;
+  }
+  button:hover { background: #274938; }
+  button:disabled { opacity: .65; cursor: wait; }
+  button.secondary { background: #e0e9de; color: #294a38; }
+  button.secondary:hover { background: #d3e0d2; }
+  :focus-visible, .budget-field:focus-within { outline: 2px solid #327451; outline-offset: 2px; }
+  .hint, .message, .rate { font-size: .91rem; }
+  .message { margin: 9px 0 0; color: var(--muted); }
+  .message:empty { margin: 0; }
+  .error, .negative { color: var(--error); }
+  #preview { background: #f0f5ec; border-color: #c7d9c3; }
+  [hidden] { display: none !important; }
+  dl { margin: 0; }
+  dd { margin: 0; font-weight: 730; overflow-wrap: anywhere; }
+  dt { color: var(--muted); font-size: .9rem; }
+  .quote-grid, .summary { display: grid; gap: 10px; }
+  .quote-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 10px; }
+  .summary div { background: var(--soft); padding: 9px 10px; border-radius: 10px; }
+  .summary dd { font-size: clamp(1rem, 2.1vw, 1.5rem); font-variant-numeric: tabular-nums; }
+  .rate { color: var(--muted); margin: 9px 0; overflow-wrap: anywhere; }
+  .records { padding: 0; margin: 0; list-style: none; }
+  .records li { padding: 11px 0 4px; border-top: 1px solid var(--line); }
+  .records li:first-child { padding-top: 0; border-top: 0; }
+  .entry-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+  .entry-top span { overflow-wrap: anywhere; }
+  .entry-top strong { font-variant-numeric: tabular-nums; }
+  .empty { padding: 14px; border-radius: 10px; background: #f5f8f3; }
+  @media (max-width: 750px) {
+    main { margin: 24px auto; }
+    .layout { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 370px) {
+    .panel { padding: 14px; }
+    .summary { gap: 6px; }
+    .summary div { padding: 8px 6px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>AI 旅費小管家</h1>
+    <p>一句話記下外幣消費，隨時查看還能花多少台幣。</p>
+  </header>
+  <p id="storage-message" class="message error" role="alert"></p>
+  <div class="layout">
+    <div class="column">
+      <section class="panel">
+        <h2><span class="step" aria-hidden="true">1</span><label for="budget">台幣總預算</label></h2>
+        <form id="budget-form" novalidate>
+          <div class="row">
+            <div class="budget-field"><span aria-hidden="true">NT$</span><input id="budget" type="text" inputmode="decimal" placeholder="30,000" maxlength="24" autocomplete="off" aria-describedby="budget-message"></div>
+            <button type="submit">儲存預算</button>
+          </div>
+          <p id="budget-message" class="message" role="status"></p>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2><span class="step" aria-hidden="true">2</span><label for="expense">這次買了什麼？</label></h2>
+        <form id="expense-form" novalidate>
+          <input id="expense" type="text" maxlength="500" autocomplete="off" placeholder="買了一杯咖啡，花了 650 日圓" aria-describedby="expense-hint expense-message">
+          <div class="row">
+            <button id="parse" type="submit">解析消費</button>
+            <p id="expense-hint" class="hint">請輸入品項、金額和幣別，例如「咖啡 650 日圓」。</p>
+          </div>
+          <p id="expense-message" class="message" role="status"></p>
+        </form>
+      </section>
+
+      <section id="preview" class="panel" aria-labelledby="preview-title" hidden>
+        <h2 id="preview-title" tabindex="-1"><span class="step" aria-hidden="true">3</span>待確認預覽</h2>
+        <dl class="quote-grid">
+          <div><dt>品項</dt><dd id="quote-item"></dd></div>
+          <div><dt>原幣金額</dt><dd id="quote-foreign"></dd></div>
+          <div><dt>約合台幣</dt><dd id="quote-twd"></dd></div>
+          <div><dt>記帳後預計餘額</dt><dd id="quote-remaining"></dd></div>
+        </dl>
+        <p id="quote-rate" class="rate"></p>
+        <div class="row">
+          <span class="step" aria-hidden="true">4</span>
+          <button id="confirm" type="button">確認記帳</button>
+          <button id="cancel" class="secondary" type="button">取消</button>
+          <span class="hint">尚未保存</span>
+        </div>
+        <p id="confirm-message" class="message" role="status"></p>
+      </section>
+    </div>
+
+    <div class="column">
+      <section class="panel">
+        <h2><span class="step" aria-hidden="true">5</span>目前旅費 <small class="hint">NT$</small></h2>
+        <dl class="summary" aria-live="polite">
+          <div><dt>總預算</dt><dd id="total">未設定</dd></div>
+          <div><dt>已花台幣</dt><dd id="spent">0</dd></div>
+          <div><dt>剩餘台幣</dt><dd id="remaining">—</dd></div>
+        </dl>
+        <p class="hint">只計入已確認的消費。</p>
+      </section>
+
+      <section class="panel">
+        <h2><span class="step" aria-hidden="true">6</span>已保存消費明細</h2>
+        <p id="empty" class="hint empty">還沒有消費紀錄。確認第一筆消費後，就會顯示在這裡。</p>
+        <ul id="records" class="records" aria-label="已保存消費明細"></ul>
+      </section>
+    </div>
+  </div>
+</main>
+<script>
+  'use strict';
+
+  const byId = (id) => document.getElementById(id);
+  const storageKey = 'ai-travel-budget.finmind.v1';
+  const cachePrefix = storageKey + '.rate.';
+  const cacheLifetime = 60 * 60 * 1000;
+  const rateCache = new Map();
+  const numberFormat = new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 2 });
+  const foreignFormat = new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 10 });
+  const money = (value) => numberFormat.format(value);
+  const twd = (value) => 'NT$' + money(value);
+  const foreign = (entry) => entry.currency + ' ' + foreignFormat.format(entry.amount);
+  const rateLabel = (entry) =>
+    '匯率 1 ' + entry.currency + ' = NT$' + entry.rate + '（即期賣出）｜日期 ' + entry.date + '｜來源 FinMind';
+
+  // 採 FinMind 資料集提供的 19 種外幣，支援 ISO 代號和常見名稱。
+  const currencyNames = {
+    AUD: ['澳幣', '澳元', '澳洲元', 'A$'],
+    CAD: ['加幣', '加元', '加拿大元', 'C$'],
+    CHF: ['瑞士法郎', '瑞郎'],
+    CNY: ['人民幣', 'RMB'],
+    EUR: ['歐元', '歐幣', '€'],
+    GBP: ['英鎊', '£'],
+    HKD: ['港幣', '港元', '港圓', 'HK$'],
+    IDR: ['印尼盾', '印尼幣', '印尼盧比'],
+    JPY: ['日圓', '日元', '日幣', '円', '¥'],
+    KRW: ['韓圓', '韓元', '韓幣', '₩'],
+    MYR: ['馬幣', '馬來幣', '馬來西亞令吉', '令吉'],
+    NZD: ['紐幣', '紐元', '紐西蘭元', 'NZ$'],
+    PHP: ['菲律賓披索', '菲律賓比索', '菲幣', '₱'],
+    SEK: ['瑞典克朗', '瑞典幣'],
+    SGD: ['新幣', '新加坡幣', '新加坡元', 'S$'],
+    THB: ['泰銖', '泰幣', '฿'],
+    USD: ['美金', '美元', '美圓', '美幣', 'US$'],
+    VND: ['越南盾', '越盾', '越幣', '₫'],
+    ZAR: ['南非幣', '南非蘭特', '南非鍰', '蘭特']
+  };
+  const currencyAliases = new Map();
+  for (const [code, names] of Object.entries(currencyNames)) {
+    for (const name of [code, ...names]) currencyAliases.set(name.toUpperCase(), code);
+  }
+  const aliases = [...currencyAliases.keys()].sort((a, b) => b.length - a.length);
+  const aliasPattern = aliases.map((alias) => alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const amountPattern = '[+-]?(?:[0-9][0-9,]*(?:\\.[0-9]+)?|\\.[0-9]+)';
+  const currencyPattern = '(?<![A-Za-z])(?:' + aliasPattern + ')(?![A-Za-z])';
+  const explicitCurrencyPattern = new RegExp('^' + currencyPattern, 'i');
+  const quotePattern = new RegExp(
+    '(?<![0-9.,+\\-])(?<before>' + amountPattern + ')\\s*(?<suffix>' + currencyPattern + ')' +
+    '|(?<prefix>' + currencyPattern + ')\\s*(?<after>' + amountPattern + ')(?![0-9.,])',
+    'gi'
+  );
+  const decimalPattern = /^[+-]?(?:(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)(?:\.[0-9]+)?|\.[0-9]+)$/;
+  const dayFormat = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' });
+
+  let state = { budgetCents: null, entries: [] };
+  let pending = null;
+  let activeRequest = null;
+
+  function status(id, message = '', error = false) {
+    const element = byId(id);
+    element.textContent = message;
+    element.classList.toggle('error', error);
+  }
+
+  function readState() {
+    const saved = localStorage.getItem(storageKey);
+    return saved === null ? { budgetCents: null, entries: [] } : JSON.parse(saved);
+  }
+
+  function saveState(next) {
+    localStorage.setItem(storageKey, JSON.stringify(next));
+    state = next;
+    render();
+  }
+
+  function spentTotal() {
+    return state.entries.reduce((sum, entry) => sum + entry.twd, 0);
+  }
+
+  function render() {
+    const spent = spentTotal();
+    const remaining = state.budgetCents === null ? null : state.budgetCents / 100 - spent;
+    byId('total').textContent = state.budgetCents === null ? '未設定' : money(state.budgetCents / 100);
+    byId('spent').textContent = money(spent);
+    byId('remaining').textContent = remaining === null ? '—' : money(remaining);
+    byId('remaining').classList.toggle('negative', remaining < 0);
+    byId('empty').hidden = state.entries.length > 0;
+    const rows = state.entries.slice().reverse().map((entry) => {
+      const row = document.createElement('li');
+      const top = document.createElement('div');
+      top.className = 'entry-top';
+      const item = document.createElement('span');
+      item.textContent = entry.item;
+      const amount = document.createElement('strong');
+      amount.textContent = twd(entry.twd);
+      top.append(item, amount);
+      const original = document.createElement('div');
+      original.className = 'hint';
+      original.textContent = foreign(entry);
+      const rate = document.createElement('p');
+      rate.className = 'rate';
+      rate.textContent = rateLabel(entry);
+      row.append(top, original, rate);
+      return row;
+    });
+    byId('records').replaceChildren(...rows);
+    renderPreview();
+  }
+
+  function renderPreview() {
+    byId('preview').hidden = !pending;
+    if (!pending) return;
+    byId('quote-item').textContent = pending.item;
+    byId('quote-foreign').textContent = foreign(pending);
+    byId('quote-twd').textContent = twd(pending.twd);
+    const remaining = state.budgetCents / 100 - spentTotal() - pending.twd;
+    byId('quote-remaining').textContent = twd(remaining);
+    byId('quote-remaining').classList.toggle('negative', remaining < 0);
+    byId('quote-rate').textContent = rateLabel(pending);
+  }
+
+  function parseExpense(text) {
+    const sentence = text.normalize('NFKC').trim();
+    if (!sentence) throw new Error('請輸入品項、金額和幣別。');
+    const matches = [...sentence.matchAll(quotePattern)];
+    if (!matches.length) {
+      if (!/\d/.test(sentence)) throw new Error('請補上金額，例如「咖啡 650 日圓」。');
+      if (new RegExp(currencyPattern, 'i').test(sentence)) {
+        throw new Error('請將金額和幣別寫在一起，例如「咖啡 650 日圓」。');
+      }
+      throw new Error('請補上幣別或使用支援的幣別代號，例如 JPY（日圓）或 USD（美元）。');
+    }
+    if (matches.length > 1) throw new Error('請一次輸入一筆消費金額。');
+    const match = matches[0];
+    const raw = match.groups.before ?? match.groups.after;
+    const amountText = raw.replaceAll(',', '');
+    const amount = Number(amountText);
+    if (!decimalPattern.test(raw) || !Number.isFinite(amount) || amount <= 0 || amount > Number.MAX_SAFE_INTEGER) {
+      throw new Error('請輸入有效的正數金額，例如「650」或「1,250.50」。');
+    }
+    const prefix = match.groups.prefix;
+    const tail = sentence.slice(match.index + match[0].length).trimStart();
+    // 單獨的 ¥ 依需求視為日圓，若金額後有明寫的幣別則採用該幣別。
+    const explicitCurrency = prefix === '¥' ? tail.match(explicitCurrencyPattern)?.[0] : undefined;
+    const before = sentence.slice(0, match.index)
+      .replace(/(?:總共|一共|共)?\s*(?:花了|花費了?|付了|付款|支付了?|刷了|金額|價格|價值|共計|總計|總消費(?:金額)?|消費金額)\s*(?:是|為)?\s*[:：]?\s*$/u, '');
+    const after = tail.slice(explicitCurrency?.length ?? 0).trimStart().replace(/^(?:的|買了?|購買了?)\s*/u, '');
+    const trimPunctuation = (value) => value.replace(/^[\s\p{P}]+|[\s\p{P}]+$/gu, '');
+    const item = trimPunctuation(before)
+      .replace(/^(?:我\s*)?(?:今天\s*)?(?:買了?|購買了?|點了|吃了|喝了)\s*/u, '')
+      .replace(/^(?:(?:一|兩|二|三|四|五|六|七|八|九|十|\d+)[杯份個碗瓶盒件張串包])\s*/u, '')
+      .trim() || trimPunctuation(after);
+    if (!item || /^(?:我|共|總共|一共|大約|約|約莫|左右|而已|整)$/u.test(item)) {
+      throw new Error('請補上品項，例如「咖啡 650 日圓」。');
+    }
+    const currency = currencyAliases.get((explicitCurrency ?? match.groups.suffix ?? prefix).toUpperCase());
+    return { item, amount, currency, amountText };
+  }
+
+  // 以十進位數字相乘再進位，避免浮點誤差把正好半元的金額捨去。
+  function roundToTwd(amountText, rate) {
+    function decimalParts(text) {
+      const [mantissa, exponent = '0'] = text.split('e');
+      const [whole, fraction = ''] = mantissa.split('.');
+      return { digits: BigInt(whole + fraction), places: fraction.length - Number(exponent) };
+    }
+    const amount = decimalParts(amountText);
+    const price = decimalParts(String(rate));
+    const product = amount.digits * price.digits;
+    const places = amount.places + price.places;
+    if (places <= 0) return Number(product * 10n ** BigInt(-places));
+    const divisor = 10n ** BigInt(places);
+    return Number((product + divisor / 2n) / divisor);
+  }
+
+  function isRate(quote) {
+    return quote && Number.isFinite(quote.rate) && quote.rate > 0 &&
+      /^\d{4}-\d{2}-\d{2}$/.test(quote.date);
+  }
+
+  async function getRate(currency, signal) {
+    let cached = rateCache.get(currency);
+    if (!cached) {
+      try {
+        cached = JSON.parse(localStorage.getItem(cachePrefix + currency));
+      } catch {
+        // 瀏覽器若限制本機儲存，匯率仍可在目前頁面內快取。
+      }
+    }
+    const age = Date.now() - cached?.savedAt;
+    if (isRate(cached) && age >= 0 && age < cacheLifetime) return cached;
+
+    const today = dayFormat.format(new Date());
+    const start = new Date(today + 'T00:00:00Z');
+    start.setUTCDate(start.getUTCDate() - 14);
+    const startDate = start.toISOString().slice(0, 10);
+    const query = new URLSearchParams({ dataset: 'TaiwanExchangeRate', data_id: currency, start_date: startDate });
+    const response = await fetch('https://api.finmindtrade.com/api/v4/data?' + query, {
+      method: 'GET', credentials: 'omit', cache: 'no-store', signal
+    });
+    if (!response.ok) throw new Error('FinMind HTTP ' + response.status);
+    const payload = await response.json();
+    if (Number(payload.status) !== 200 || !Array.isArray(payload.data)) throw new Error('FinMind 回應無效');
+
+    let latest = null;
+    for (const row of payload.data) {
+      if (!row || row.currency !== currency) continue;
+      if (typeof row.spot_sell !== 'number' && typeof row.spot_sell !== 'string') continue;
+      const quote = { rate: Number(row.spot_sell), date: row.date };
+      if (isRate(quote) && quote.date >= startDate && quote.date <= today && (!latest || quote.date > latest.date)) {
+        latest = quote;
+      }
+    }
+    if (!latest) throw new Error('近期無有效的即期賣出匯率');
+    const saved = { ...latest, savedAt: Date.now() };
+    rateCache.set(currency, saved);
+    try {
+      localStorage.setItem(cachePrefix + currency, JSON.stringify(saved));
+    } catch {
+      // 本機快取寫入失敗時，仍可使用目前取得的匯率。
+    }
+    return saved;
+  }
+
+  function discardPreview() {
+    pending = null;
+    byId('preview').hidden = true;
+    status('confirm-message');
+  }
+
+  function setLoading(loading) {
+    byId('parse').disabled = loading;
+    byId('parse').textContent = loading ? '查詢匯率中…' : '解析消費';
+  }
+
+  byId('budget-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const raw = byId('budget').value.normalize('NFKC').trim();
+    const amount = Number(raw.replaceAll(',', ''));
+    const cents = Math.round(amount * 100);
+    if (!decimalPattern.test(raw) || (raw.split('.')[1]?.length ?? 0) > 2 ||
+        !Number.isSafeInteger(cents) || cents <= 0) {
+      status('budget-message', '請輸入大於 0 的台幣預算，最多兩位小數。', true);
+      return;
+    }
+    try {
+      saveState({ ...readState(), budgetCents: cents });
+      byId('budget').value = money(cents / 100);
+      status('budget-message', '預算已儲存。');
+    } catch {
+      status('budget-message', '無法儲存預算。請確認瀏覽器允許此頁面使用本機儲存。', true);
+    }
+  });
+
+  byId('expense').addEventListener('input', () => {
+    if (activeRequest) activeRequest.abort();
+    activeRequest = null;
+    setLoading(false);
+    discardPreview();
+    status('expense-message');
+  });
+
+  byId('expense-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (activeRequest) return;
+    discardPreview();
+    status('expense-message');
+    let parsed;
+    try {
+      parsed = parseExpense(byId('expense').value);
+    } catch (error) {
+      status('expense-message', error.message, true);
+      return;
+    }
+    if (state.budgetCents === null) {
+      status('expense-message', '請先儲存台幣總預算。', true);
+      byId('budget').focus();
+      return;
+    }
+
+    const request = new AbortController();
+    activeRequest = request;
+    const timeout = setTimeout(() => request.abort(), 18000);
+    setLoading(true);
+    try {
+      const quote = await getRate(parsed.currency, request.signal);
+      if (activeRequest !== request) return;
+      if (state.budgetCents === null) {
+        status('expense-message', '請先儲存台幣總預算。', true);
+        return;
+      }
+      const { amountText, ...expense } = parsed;
+      const rounded = roundToTwd(amountText, quote.rate);
+      if (!Number.isSafeInteger(rounded)) {
+        status('expense-message', '換算金額超出可記帳的範圍。', true);
+        return;
+      }
+      pending = { ...expense, twd: rounded, rate: quote.rate, date: quote.date };
+      renderPreview();
+      byId('preview-title').focus();
+    } catch {
+      if (activeRequest === request) {
+        status('expense-message', '無法取得 FinMind 匯率，請確認網路連線或稍後再試。', true);
+      }
+    } finally {
+      clearTimeout(timeout);
+      if (activeRequest === request) {
+        activeRequest = null;
+        setLoading(false);
+      }
+    }
+  });
+
+  byId('cancel').addEventListener('click', () => {
+    discardPreview();
+    status('expense-message', '已取消預覽。');
+    byId('expense').focus();
+  });
+
+  byId('confirm').addEventListener('click', () => {
+    if (!pending) return;
+    try {
+      const current = readState();
+      if (current.budgetCents === null) {
+        status('confirm-message', '請先儲存台幣總預算。', true);
+        return;
+      }
+      const nextTotal = current.entries.reduce((sum, entry) => sum + entry.twd, pending.twd);
+      if (!Number.isSafeInteger(nextTotal)) {
+        status('confirm-message', '消費合計超出可記帳的範圍。', true);
+        return;
+      }
+      saveState({ ...current, entries: [...current.entries, pending] });
+      discardPreview();
+      byId('expense').value = '';
+      status('expense-message', '已確認記帳。');
+      byId('expense').focus();
+    } catch {
+      status('confirm-message', '無法保存這筆消費。請確認瀏覽器允許此頁面使用本機儲存。', true);
+    }
+  });
+
+  function restoreState() {
+    try {
+      state = readState();
+      byId('budget').value = state.budgetCents === null ? '' : money(state.budgetCents / 100);
+      if (state.budgetCents === null) discardPreview();
+      render();
+    } catch {
+      status('storage-message', '無法讀取本機資料。請確認瀏覽器允許此頁面使用本機儲存。', true);
+    }
+  }
+
+  window.addEventListener('storage', (event) => {
+    if (event.key === storageKey || event.key === null) restoreState();
+  });
+  restoreState();
+</script>
+</body>
+</html>
